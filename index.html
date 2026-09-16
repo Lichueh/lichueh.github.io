@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>施工中</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #f2e8d5; overflow: hidden; }
+  body { display: flex; align-items: center; justify-content: center; }
+  canvas { image-rendering: pixelated; image-rendering: crisp-edges; display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+(() => {
+  const W = 192, H = 108;
+  const off = document.createElement('canvas');
+  off.width = W; off.height = H;
+  const g = off.getContext('2d');
+  const cv = document.getElementById('c');
+  const ctx = cv.getContext('2d');
+
+  function resize() {
+    const s = Math.max(1, Math.floor(Math.min(innerWidth / W, innerHeight / H)));
+    cv.width = W * s; cv.height = H * s;
+    ctx.imageSmoothingEnabled = false;
+  }
+  addEventListener('resize', resize);
+  resize();
+
+  // 調色盤
+  const C = {
+    bg: '#f2e8d5', ground: '#e4d6b8', line: '#cbbb98',
+    yellow: '#f5c400', yellowDk: '#d9a600', outline: '#3a3226',
+    steel: '#4d4d4d', steelLt: '#8a8a8a', glass: '#9fdcff',
+    track: '#3b3b3b', trackLt: '#6b6b6b', dirt: '#8b5e3c', dirtLt: '#a9754b',
+    post: '#8b5a2b', board: '#fff8e8', red: '#d8471f', smoke: '#9a948a'
+  };
+  const px = (x, y, w, h, c) => { g.fillStyle = c; g.fillRect(x, y, w, h); };
+
+  // 中文字：系統字型畫在低解析畫布後二值化，放大即為像素字
+  function textPts(str, font) {
+    const t = document.createElement('canvas');
+    t.width = W; t.height = H;
+    const tc = t.getContext('2d');
+    tc.font = font; tc.textAlign = 'center'; tc.textBaseline = 'middle';
+    tc.fillStyle = '#fff'; tc.fillText(str, W / 2, H / 2);
+    const d = tc.getImageData(0, 0, W, H).data;
+    const pts = [];
+    for (let i = 0; i < W * H; i++) if (d[i * 4 + 3] > 120) pts.push([i % W, (i / W) | 0]);
+    return pts;
+  }
+  const ZH = textPts('施工中', 'bold 15px "PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif');
+
+  // 粗像素線段（先畫深色外框再畫本色）
+  function thick(x0, y0, x1, y1, col, w) {
+    const dx = x1 - x0, dy = y1 - y0, n = Math.max(1, Math.round(Math.hypot(dx, dy)));
+    const h = (w - 1) / 2;
+    for (let i = 0; i <= n; i++) {
+      const x = Math.round(x0 + dx * i / n), y = Math.round(y0 + dy * i / n);
+      px(x - h, y - h, w, w, col);
+    }
+  }
+  function arm(x0, y0, x1, y1, w) {
+    thick(x0, y0, x1, y1, C.outline, w + 2);
+    thick(x0, y0, x1, y1, C.yellow, w);
+  }
+
+  const GY = 80;                 // 地面線
+  const PIV = { x: 102, y: 54 };  // 大臂樞軸
+  const BOOM = 26, STICK = 22;
+  // 關鍵姿勢：[大臂角度, 小臂角度]（度，螢幕座標 y 向下，負值朝上）
+  const KF = [[-58, 70], [-32, 88], [-14, 104], [-30, 125], [-58, 115], [-64, 75]];
+  const CYCLE = 66;
+  const ease = u => u * u * (3 - 2 * u);
+  const rad = d => d * Math.PI / 180;
+
+  let t = 0, smoke = [], chips = [];
+
+  function pose() {
+    const u = (t % CYCLE) / CYCLE * KF.length;
+    const i = Math.floor(u), f = ease(u - i);
+    const a = KF[i], b = KF[(i + 1) % KF.length];
+    return { boom: a[0] + (b[0] - a[0]) * f, stick: a[1] + (b[1] - a[1]) * f, seg: i };
+  }
+
+  function drawGround() {
+    px(0, 0, W, H, C.bg);
+    px(0, GY, W, H - GY, C.ground);
+    px(0, GY, W, 1, C.line);
+    // 土堆（右側）
+    for (let r = 0; r < 8; r++) px(114 + r * 2, GY - 1 - r, 34 - r * 4, 1, r === 7 ? C.dirtLt : C.dirt);
+    px(124, GY - 4, 2, 1, C.dirtLt); px(132, GY - 6, 2, 1, C.dirtLt);
+  }
+
+  function drawSign() {
+    // 立柱 + 木板 + 紅字
+    px(34, 50, 4, GY - 50, C.post); px(34, 50, 1, GY - 50, '#6e4520');
+    px(8, 26, 56, 26, C.outline);
+    px(10, 28, 52, 22, C.board);
+    px(10, 48, 52, 2, '#e5dcc6');
+    // 四角螺絲
+    [[12, 30], [58, 30], [12, 46], [58, 46]].forEach(([x, y]) => px(x, y, 2, 2, C.steelLt));
+    const cx = 36, cy = 39;
+    for (const [x, y] of ZH) px(x - W / 2 + cx, y - H / 2 + cy, 1, 1, C.red);
+  }
+
+  function drawExcavator(p) {
+    // 履帶
+    px(60, GY - 10, 50, 10, C.track);
+    px(58, GY - 8, 54, 6, C.track);
+    for (let x = 63; x < 110; x += 8) px(x, GY - 5, 2, 2, C.trackLt);
+    px(61, GY - 9, 48, 1, C.trackLt);
+    // 底盤與旋轉座
+    px(72, GY - 14, 26, 4, C.steel);
+    px(76, GY - 16, 18, 2, C.steelLt);
+    // 車身
+    px(62, 50, 44, 14, C.outline);
+    px(63, 51, 42, 12, C.yellow);
+    px(63, 60, 42, 3, C.yellowDk);
+    px(56, 53, 8, 10, C.outline); px(57, 54, 6, 8, C.yellowDk);  // 配重
+    // 駕駛室
+    px(66, 36, 20, 16, C.outline);
+    px(67, 37, 18, 14, C.yellow);
+    px(69, 39, 14, 9, C.glass);
+    px(69, 39, 14, 1, '#d9f3ff'); px(75, 39, 1, 9, C.outline);
+    // 排氣管
+    px(94, 44, 3, 7, C.steel); px(94, 44, 3, 1, C.steelLt);
+
+    // 大臂、小臂、鏟斗
+    const b = rad(p.boom), s = rad(p.stick);
+    const ex = PIV.x + Math.cos(b) * BOOM, ey = PIV.y + Math.sin(b) * BOOM;
+    const kx = ex + Math.cos(s) * STICK, ky = ey + Math.sin(s) * STICK;
+    arm(PIV.x, PIV.y, ex, ey, 5);
+    arm(ex, ey, kx, ky, 3);
+    px(Math.round(ex) - 2, Math.round(ey) - 2, 4, 4, C.steel);  // 關節
+    px(PIV.x - 2, PIV.y - 2, 4, 4, C.steel);
+    // 鏟斗（開口朝左下）
+    const bx = Math.round(kx), by = Math.round(ky);
+    px(bx - 3, by - 2, 9, 8, C.outline);
+    px(bx - 2, by - 1, 7, 6, C.steel);
+    px(bx - 2, by - 1, 7, 2, C.steelLt);
+    px(bx - 4, by + 2, 2, 3, C.outline); px(bx - 3, by + 6, 2, 1, C.outline); px(bx + 1, by + 6, 2, 1, C.outline);
+    // 舉起時斗內有土
+    if (p.seg === 3 || p.seg === 4) px(bx - 1, by, 5, 3, C.dirt);
+    return { bx, by };
+  }
+
+  function drawParticles() {
+    for (const s of smoke) {
+      g.globalAlpha = Math.max(0, s.life / 30) * 0.7;
+      const r = s.life < 18 ? 3 : 2;
+      px(Math.round(s.x) - 1, Math.round(s.y) - 1, r, r, C.smoke);
+    }
+    g.globalAlpha = 1;
+    for (const c of chips) px(Math.round(c.x), Math.round(c.y), 1, 1, C.dirt);
+  }
+
+  function tick() {
+    t++;
+    const p = pose();
+    if (t % 9 === 0) smoke.push({ x: 95.5, y: 43, vx: 0.15, vy: -0.45, life: 30 });
+    for (const s of smoke) { s.x += s.vx; s.y += s.vy; s.life--; }
+    smoke = smoke.filter(s => s.life > 0);
+
+    drawGround();
+    drawSign();
+    const k = drawExcavator(p);
+    // 鏟進土堆時飛出土屑
+    if (p.seg === 2 && t % 3 === 0) {
+      for (let i = 0; i < 3; i++) chips.push({ x: k.bx - 2 + Math.random() * 4, y: k.by + 5, vx: -(Math.random() * 1.2 + 0.3), vy: -(Math.random() * 1.4 + 0.4), life: 16 });
+    }
+    for (const c of chips) { c.x += c.vx; c.y += c.vy; c.vy += 0.15; c.life--; }
+    chips = chips.filter(c => c.life > 0 && c.y < GY);
+    drawParticles();
+    ctx.drawImage(off, 0, 0, cv.width, cv.height);
+  }
+
+  let last = 0;
+  function loop(now) {
+    if (now - last >= 90) { last = now; tick(); }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
